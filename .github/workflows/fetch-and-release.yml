@@ -25,7 +25,7 @@ jobs:
         
     - name: Tidy Go modules
       run: |
-       go mod init .
+       go mod init main.go
        go mod tidy
 
     - name: Run Fetch and Convert
