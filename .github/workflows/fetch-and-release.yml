@@ -24,7 +24,9 @@ jobs:
         check-latest: true
         
     - name: Tidy Go modules
-      run: go mod tidy
+      run: |
+       go mod init .
+       go mod tidy
 
     - name: Run Fetch and Convert
       run: go run . -f -a asns.txt
