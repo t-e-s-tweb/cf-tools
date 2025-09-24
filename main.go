@@ -19,7 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-
+  "net/http"
 	"github.com/flynn/noise"
 	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/curve25519"
