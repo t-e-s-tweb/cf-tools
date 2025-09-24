@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"net/http"
 	"net/netip"
 	"os"
 	"sort"
@@ -27,7 +26,6 @@ import (
 )
 
 const (
-	asnToFilter = 13335                           // The CloudFlare ASN
 	url         = "https://bgp.tools/table.jsonl" // URL for the JSONL table dump
 	userAgent   = "compassvpn-cf-tools bgp.tools" // Custom User-Agent header
 
@@ -41,9 +39,9 @@ const (
 	TestIPIncrement2 = 69  // Second IP to check in a /24 prefix
 	TestIPIncrement3 = 144 // Third IP to check in a /24 prefix
 
-	defaultInputFile      = "all_cf_v4.txt"   // Default output file name: All CloudFlare IPv4 ranges converted to /24 prefixes
-	defaultCDNOutputFile  = "all_cdn_v4.txt"  // Default output file name: All CloudFlare CDN IPv4 with /24 prefixes
-	defaultWARPOutputFile = "all_warp_v4.txt" // Default output file name: All CloudFlare WARP IPv4 with /24 prefixes
+	defaultInputFile      = "all_cf_v4.txt"   // Default output file name: All IPv4 ranges converted to /24 prefixes
+	defaultCDNOutputFile  = "all_cdn_v4.txt"  // Default output file name: All CDN IPv4 with /24 prefixes
+	defaultWARPOutputFile = "all_warp_v4.txt" // Default output file name: All WARP IPv4 with /24 prefixes
 
 	// WARP Wireguard configurations
 	privateKeyB64   = "0ALZyBx68KO4by/oQR+3kmPpYbrOuq605aBYv5GKU0Y="
@@ -53,7 +51,7 @@ const (
 
 var (
 	httpClient = &http.Client{Timeout: RequestTimeout}
-	scanPorts  = []int{2408} // List of ports to scan WARP. Example: {2408, 7559, 2371, 894, ...}
+	scanPorts  = []int{2408} // List of ports to scan WARP
 )
 
 // Prefix structure for JSON parsing
@@ -71,15 +69,50 @@ type PrefixResult struct {
 // Helper function to show usage
 func showHelp() {
 	fmt.Println("Usage:")
-	fmt.Println("  -h, --help    Show help")
-	fmt.Println("  -f, --fetch   Fetch and convert to /24 only")
-	fmt.Println("  -c, --cdn     Run the CDN checker")
-	fmt.Println("  -w, --warp    Run the WARP checker")
-	fmt.Println("  -o, --output  Specify the output file name")
+	fmt.Println("  -h, --help       Show help")
+	fmt.Println("  -f, --fetch      Fetch and convert to /24 only")
+	fmt.Println("  -c, --cdn        Run the CDN checker")
+	fmt.Println("  -w, --warp       Run the WARP checker")
+	fmt.Println("  -o, --output     Specify the output file name")
+	fmt.Println("  -a, --asn-file   Specify the input file containing ASNs")
 }
 
-// Fetches the prefixes from the URL and filters them by the given ASN
-func fetchAndFilterPrefixes(url string, asn int) ([]netip.Prefix, error) {
+// Reads ASNs from a text file
+func readASNsFromFile(filename string) ([]int, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("opening ASN file: %w", err)
+	}
+	defer file.Close()
+
+	var asns []int
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		asn, err := strconv.Atoi(line)
+		if err != nil {
+			fmt.Printf("Skipping invalid ASN '%s': %v\n", line, err)
+			continue
+		}
+		asns = append(asns, asn)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scanning ASN file: %w", err)
+	}
+
+	if len(asns) == 0 {
+		return nil, fmt.Errorf("no valid ASNs found in file %s", filename)
+	}
+
+	return asns, nil
+}
+
+// Fetches the prefixes from the URL and filters them by the given ASNs
+func fetchAndFilterPrefixes(url string, asns []int) ([]netip.Prefix, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
@@ -100,6 +133,12 @@ func fetchAndFilterPrefixes(url string, asn int) ([]netip.Prefix, error) {
 		return nil, fmt.Errorf("received non-200 status code %d", resp.StatusCode)
 	}
 
+	// Create a map for quick ASN lookup
+	asnSet := make(map[int]struct{})
+	for _, asn := range asns {
+		asnSet[asn] = struct{}{}
+	}
+
 	var v4Prefixes []netip.Prefix
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
@@ -112,8 +151,8 @@ func fetchAndFilterPrefixes(url string, asn int) ([]netip.Prefix, error) {
 			continue
 		}
 
-		// Filter for the specified ASN and store IPv4 prefixes
-		if prefix.ASN == asn && !prefix.CIDR.Addr().Is6() {
+		// Filter for the specified ASNs and store IPv4 prefixes
+		if _, exists := asnSet[prefix.ASN]; exists && !prefix.CIDR.Addr().Is6() {
 			v4Prefixes = append(v4Prefixes, prefix.CIDR)
 		}
 	}
@@ -121,6 +160,10 @@ func fetchAndFilterPrefixes(url string, asn int) ([]netip.Prefix, error) {
 	// Check for errors during scanning
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scanning response: %w", err)
+	}
+
+	if len(v4Prefixes) == 0 {
+		return nil, fmt.Errorf("no IPv4 prefixes found for the specified ASNs")
 	}
 
 	return v4Prefixes, nil
@@ -237,7 +280,7 @@ func intToIP(ipInt *big.Int) netip.Addr {
 	return ip
 }
 
-// Checks if an IP address responds with StatusOK for the CDN trace URL.
+// Checks if an IP address responds with StatusOK for the CDN trace URL
 func isValidCDNIP(ip netip.Addr) bool {
 	url := fmt.Sprintf("http://%s/cdn-cgi/trace", ip)
 
@@ -254,7 +297,7 @@ func isValidCDNIP(ip netip.Addr) bool {
 	return false
 }
 
-// Increments the given IP address by a specified value.
+// Increments the given IP address by a specified value
 func incrementIP(ip netip.Addr, increment int) netip.Addr {
 	ipBytes := ip.As4()
 	ipUint := uint32(ipBytes[0])<<24 | uint32(ipBytes[1])<<16 | uint32(ipBytes[2])<<8 | uint32(ipBytes[3])
@@ -263,7 +306,7 @@ func incrementIP(ip netip.Addr, increment int) netip.Addr {
 	return newIP
 }
 
-// Checks if any IP within the prefix is a CDN IP.
+// Checks if any IP within the prefix is a CDN IP
 func processPrefixCDN(prefix netip.Prefix) bool {
 	baseIP := prefix.Addr()
 	testIP1 := incrementIP(baseIP, TestIPIncrement1)
@@ -272,7 +315,7 @@ func processPrefixCDN(prefix netip.Prefix) bool {
 	return isValidCDNIP(testIP1) || isValidCDNIP(testIP2) || isValidCDNIP(testIP3)
 }
 
-// Processes each prefix and sends the result to the channel.
+// Processes each prefix and sends the result to the channel
 func parallelFunctionCDN(ipChannel chan PrefixResult, prefix netip.Prefix) {
 	isValid := processPrefixCDN(prefix)
 	ipChannel <- PrefixResult{
@@ -487,6 +530,8 @@ func main() {
 	fetchFlagLong := flag.Bool("fetch", false, "Fetch and convert to /24 only")
 	outputFile := flag.String("o", "", "Specify the output file name")
 	outputFileLong := flag.String("output", "", "Specify the output file name")
+	asnFile := flag.String("a", "", "Specify the input file containing ASNs")
+	asnFileLong := flag.String("asn-file", "", "Specify the input file containing ASNs")
 
 	flag.Parse()
 
@@ -501,8 +546,31 @@ func main() {
 		return
 	}
 
-	// Fetch and filter the prefixes
-	v4Prefixes, err := fetchAndFilterPrefixes(url, asnToFilter)
+	// Determine the ASN file
+	asnInput := ""
+	if *asnFile != "" {
+		asnInput = *asnFile
+	}
+	if *asnFileLong != "" {
+		asnInput = *asnFileLong
+	}
+
+	// Read ASNs from file or use default ASN
+	var asns []int
+	if asnInput != "" {
+		var err error
+		asns, err = readASNsFromFile(asnInput)
+		if err != nil {
+			fmt.Printf("Error reading ASNs from file: %v\n", err)
+			return
+		}
+	} else {
+		// Default to CloudFlare ASN if no file is specified
+		asns = []int{13335}
+	}
+
+	// Fetch and filter the prefixes for all ASNs
+	v4Prefixes, err := fetchAndFilterPrefixes(url, asns)
 	if err != nil {
 		fmt.Printf("Error fetching and filtering prefixes: %v\n", err)
 		return
