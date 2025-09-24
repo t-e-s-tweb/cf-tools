@@ -27,7 +27,7 @@ jobs:
       run: go mod tidy
 
     - name: Run Fetch and Convert
-      run: go run . -f
+      run: go run . -f -a asns.txt
 
     - name: Run CDN Checker
       run: go run . -c
