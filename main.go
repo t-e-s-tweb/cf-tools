@@ -26,20 +26,34 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-const (
-	asnToFilter = 13335                           // The CloudFlare ASN
-	url         = "https://bgp.tools/table.jsonl" // URL for the JSONL table dump
-	userAgent   = "compassvpn-cf-tools bgp.tools" // Custom User-Agent header
+var (
+	asnsToFilter = []int{
+		13335,
+		209242,
+		14789,
+		202623,
+		203898,
+		394536,
+		395747,
+		139242,
+		132892,
+	}
+	url       = "https://bgp.tools/table.jsonl" // URL for the JSONL table dump
+	userAgent = "compassvpn-cf-tools bgp.tools" // Custom User-Agent header
+)
 
-	ConcurrentPrefixes = 89 // Number of Concurrencies
+const (
+	ConcurrentPrefixes = 55 // Number of Concurrencies
 	RetryCount         = 4  // Number of retries if one checker fails
 
 	RetryDelay     = 1 * time.Second // Delay between each retry
-	RequestTimeout = 1 * time.Second // Timeout delay
+	RequestTimeout = 4 * time.Second // Timeout delay
 
-	TestIPIncrement1 = 13  // First IP to check in a /24 prefix
-	TestIPIncrement2 = 69  // Second IP to check in a /24 prefix
-	TestIPIncrement3 = 144 // Third IP to check in a /24 prefix
+	TestIPIncrement1 = 8   // First IP to check in a /24 prefix (Changed from 13 to 8)
+	TestIPIncrement2 = 13  // Second IP to check in a /24 prefix
+	TestIPIncrement3 = 69  // Third IP to check in a /24 prefix
+	TestIPIncrement4 = 144 // Fourth IP to check in a /24 prefix
+	TestIPIncrement5 = 234 // Fifth IP to check in a /24 prefix
 
 	defaultInputFile      = "all_cf_v4.txt"   // Default output file name: All CloudFlare IPv4 ranges converted to /24 prefixes
 	defaultCDNOutputFile  = "all_cdn_v4.txt"  // Default output file name: All CloudFlare CDN IPv4 with /24 prefixes
@@ -78,8 +92,8 @@ func showHelp() {
 	fmt.Println("  -o, --output  Specify the output file name")
 }
 
-// Fetches the prefixes from the URL and filters them by the given ASN
-func fetchAndFilterPrefixes(url string, asn int) ([]netip.Prefix, error) {
+// Fetches the prefixes from the URL and filters them by the given ASNs
+func fetchAndFilterPrefixes(url string, asns []int) ([]netip.Prefix, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
@@ -112,8 +126,16 @@ func fetchAndFilterPrefixes(url string, asn int) ([]netip.Prefix, error) {
 			continue
 		}
 
-		// Filter for the specified ASN and store IPv4 prefixes
-		if prefix.ASN == asn && !prefix.CIDR.Addr().Is6() {
+		// Filter for the specified ASNs and store IPv4 prefixes
+		isTargetASN := false
+		for _, asn := range asns {
+			if prefix.ASN == asn {
+				isTargetASN = true
+				break
+			}
+		}
+
+		if isTargetASN && !prefix.CIDR.Addr().Is6() {
 			v4Prefixes = append(v4Prefixes, prefix.CIDR)
 		}
 	}
@@ -269,7 +291,9 @@ func processPrefixCDN(prefix netip.Prefix) bool {
 	testIP1 := incrementIP(baseIP, TestIPIncrement1)
 	testIP2 := incrementIP(baseIP, TestIPIncrement2)
 	testIP3 := incrementIP(baseIP, TestIPIncrement3)
-	return isValidCDNIP(testIP1) || isValidCDNIP(testIP2) || isValidCDNIP(testIP3)
+	testIP4 := incrementIP(baseIP, TestIPIncrement4)
+	testIP5 := incrementIP(baseIP, TestIPIncrement5)
+	return isValidCDNIP(testIP1) || isValidCDNIP(testIP2) || isValidCDNIP(testIP3) || isValidCDNIP(testIP4) || isValidCDNIP(testIP5)
 }
 
 // Processes each prefix and sends the result to the channel.
@@ -463,7 +487,9 @@ func processPrefixWARP(prefix netip.Prefix) bool {
 	testIP1 := incrementIP(baseIP, TestIPIncrement1)
 	testIP2 := incrementIP(baseIP, TestIPIncrement2)
 	testIP3 := incrementIP(baseIP, TestIPIncrement3)
-	return isValidWarpIP(testIP1) || isValidWarpIP(testIP2) || isValidWarpIP(testIP3)
+	testIP4 := incrementIP(baseIP, TestIPIncrement4)
+	testIP5 := incrementIP(baseIP, TestIPIncrement5)
+	return isValidWarpIP(testIP1) || isValidWarpIP(testIP2) || isValidWarpIP(testIP3) || isValidWarpIP(testIP4) || isValidWarpIP(testIP5)
 }
 
 // Processes each prefix and sends the result to the channel
@@ -502,7 +528,7 @@ func main() {
 	}
 
 	// Fetch and filter the prefixes
-	v4Prefixes, err := fetchAndFilterPrefixes(url, asnToFilter)
+	v4Prefixes, err := fetchAndFilterPrefixes(url, asnsToFilter)
 	if err != nil {
 		fmt.Printf("Error fetching and filtering prefixes: %v\n", err)
 		return
