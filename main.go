@@ -44,7 +44,7 @@ var (
 
 const (
 	ConcurrentPrefixes = 55 // Number of Concurrencies
-	RetryCount         = 0  // Number of retries if one checker fails
+	RetryCount         = 1  // Number of retries if one checker fails
 
 	RetryDelay     = 300 * time.Millisecond // Delay between each retry
 	RequestTimeout = 1500 * time.Millisecond // Timeout delay
