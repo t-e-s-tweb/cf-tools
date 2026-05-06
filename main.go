@@ -44,16 +44,13 @@ var (
 
 const (
 	ConcurrentPrefixes = 55 // Number of Concurrencies
-	RetryCount         = 4  // Number of retries if one checker fails
+	RetryCount         = 0  // Number of retries if one checker fails
 
-	RetryDelay     = 1 * time.Second // Delay between each retry
-	RequestTimeout = 4 * time.Second // Timeout delay
+	RetryDelay     = 300 * time.Millisecond // Delay between each retry
+	RequestTimeout = 1500 * time.Millisecond // Timeout delay
 
 	TestIPIncrement1 = 8   // First IP to check in a /24 prefix (Changed from 13 to 8)
-	TestIPIncrement2 = 13  // Second IP to check in a /24 prefix
-	TestIPIncrement3 = 69  // Third IP to check in a /24 prefix
-	TestIPIncrement4 = 144 // Fourth IP to check in a /24 prefix
-	TestIPIncrement5 = 234 // Fifth IP to check in a /24 prefix
+	TestIPIncrement2 = 128  // MilliSecond IP to check in a /24 prefix
 
 	defaultInputFile      = "all_cf_v4.txt"   // Default output file name: All CloudFlare IPv4 ranges converted to /24 prefixes
 	defaultCDNOutputFile  = "all_cdn_v4.txt"  // Default output file name: All CloudFlare CDN IPv4 with /24 prefixes
@@ -290,10 +287,7 @@ func processPrefixCDN(prefix netip.Prefix) bool {
 	baseIP := prefix.Addr()
 	testIP1 := incrementIP(baseIP, TestIPIncrement1)
 	testIP2 := incrementIP(baseIP, TestIPIncrement2)
-	testIP3 := incrementIP(baseIP, TestIPIncrement3)
-	testIP4 := incrementIP(baseIP, TestIPIncrement4)
-	testIP5 := incrementIP(baseIP, TestIPIncrement5)
-	return isValidCDNIP(testIP1) || isValidCDNIP(testIP2) || isValidCDNIP(testIP3) || isValidCDNIP(testIP4) || isValidCDNIP(testIP5)
+	return isValidCDNIP(testIP1) || isValidCDNIP(testIP2)
 }
 
 // Processes each prefix and sends the result to the channel.
@@ -486,10 +480,7 @@ func processPrefixWARP(prefix netip.Prefix) bool {
 	baseIP := prefix.Addr()
 	testIP1 := incrementIP(baseIP, TestIPIncrement1)
 	testIP2 := incrementIP(baseIP, TestIPIncrement2)
-	testIP3 := incrementIP(baseIP, TestIPIncrement3)
-	testIP4 := incrementIP(baseIP, TestIPIncrement4)
-	testIP5 := incrementIP(baseIP, TestIPIncrement5)
-	return isValidWarpIP(testIP1) || isValidWarpIP(testIP2) || isValidWarpIP(testIP3) || isValidWarpIP(testIP4) || isValidWarpIP(testIP5)
+	return isValidWarpIP(testIP1) || isValidWarpIP(testIP2)
 }
 
 // Processes each prefix and sends the result to the channel
